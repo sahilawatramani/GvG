@@ -1,3 +1,13 @@
+---
+title: GvG Defense API
+emoji: 🚀
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_file: app.py
+pinned: false
+---
+
 # GvG: GAN-vs-GAN Defense for Intrusion Detection Systems
 
 ## Overview

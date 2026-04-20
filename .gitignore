@@ -5,3 +5,9 @@ __pycache__/
 .ipynb_checkpoints/
 .codex
 datasets/
+
+# System and project specific
+frontend/node_modules/
+frontend/dist/
+*.pt
+venv/

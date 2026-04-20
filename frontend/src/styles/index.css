@@ -1,0 +1,8 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+
+/* Force dark mode for cybersecurity theme */
+html {
+  color-scheme: dark;
+}
