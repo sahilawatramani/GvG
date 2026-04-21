@@ -147,6 +147,43 @@ export async function predictTraffic(
   return res.json();
 }
 
+export interface EvasionShift {
+  feature: string;
+  original: number;
+  morphed: number;
+  shift: "increased" | "decreased";
+}
+
+export interface EvasionResponse {
+  original_features: number[];
+  morphed_features: number[];
+  top_shifts: EvasionShift[];
+  counter_measures: string[];
+}
+
+export async function simulateEvasion(
+  row: Record<string, number>
+): Promise<EvasionResponse> {
+  const res = await fetch(`${API_BASE}/simulate_evasion`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify([row]),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    let detail = `Server error ${res.status}`;
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed.detail) detail = parsed.detail;
+    } catch {
+      /* ignore parse errors */
+    }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+
 // ---- Artifact Endpoints ----
 
 async function fetchJSON<T>(path: string): Promise<T> {

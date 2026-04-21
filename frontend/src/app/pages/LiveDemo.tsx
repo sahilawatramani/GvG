@@ -1,16 +1,18 @@
 import { motion } from "motion/react";
 import { useState, useRef, useCallback } from "react";
 import { CheckCircle2, AlertCircle, Download, FileUp, Shield, Cpu, Timer, Loader2, XCircle, FileText } from "lucide-react";
+import { ThreatIntelPanel } from "../components/ThreatIntelPanel";
 import { GlassCard } from "../components/GlassCard";
 import { GlowingBadge } from "../components/GlowingBadge";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
-import { parseCSV, predictTraffic, readFileAsText, type PredictResponse } from "../lib/api";
+import { parseCSV, predictTraffic, readFileAsText, simulateEvasion, type PredictResponse, type EvasionResponse } from "../lib/api";
 
 interface DisplayResult {
   id: number;
   label: string;
   confidence: number;
   class: "benign" | "attack";
+  originalRow: Record<string, number>;
 }
 
 const requiredColumns = [
@@ -20,14 +22,15 @@ const requiredColumns = [
   "Bwd IAT Mean", "Protocol", "Destination Port",
 ];
 
-function mapPredictions(response: PredictResponse): DisplayResult[] {
-  return response.tabular_predictions.map((pred) => ({
+function mapPredictions(response: PredictResponse, rows: Record<string, number>[]): DisplayResult[] {
+  return response.tabular_predictions.map((pred, i) => ({
     id: pred.row + 1,
     label: pred.predicted_binary_label === 0 ? "BENIGN" : "ATTACK",
     confidence: pred.predicted_binary_label === 0
       ? 1 - pred.attack_probability
       : pred.attack_probability,
     class: pred.predicted_binary_label === 0 ? "benign" : "attack",
+    originalRow: rows[i],
   }));
 }
 
@@ -48,6 +51,10 @@ export function LiveDemo() {
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [sequenceInfo, setSequenceInfo] = useState<string | null>(null);
+  
+  const [threatData, setThreatData] = useState<EvasionResponse | null>(null);
+  const [simulatingId, setSimulatingId] = useState<number | null>(null);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const hasResults = results.length > 0;
@@ -65,7 +72,7 @@ export function LiveDemo() {
       const rows = parseCSV(text);
 
       const response = await predictTraffic(rows);
-      const mapped = mapPredictions(response);
+      const mapped = mapPredictions(response, rows);
 
       setResults(mapped);
       setDistribution(computeDistribution(mapped));
@@ -80,6 +87,18 @@ export function LiveDemo() {
       setLoading(false);
     }
   }, []);
+
+  const handleSimulate = async (row: Record<string, number>, id: number) => {
+    setSimulatingId(id);
+    try {
+      const data = await simulateEvasion(row);
+      setThreatData(data);
+    } catch (err: any) {
+      setError(err.message || "Failed to simulate evasion");
+    } finally {
+      setSimulatingId(null);
+    }
+  };
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -282,7 +301,7 @@ export function LiveDemo() {
                 <table className="w-full">
                   <thead className="sticky top-0 bg-[#0f1629]">
                     <tr className="border-b border-[rgba(14,165,233,0.08)]">
-                      {["#", "Prediction", "Confidence", "Status"].map((h) => (
+                      {["#", "Prediction", "Confidence", "Status", "Action"].map((h) => (
                         <th key={h} className="text-left p-3 text-[10px] font-semibold uppercase tracking-wider text-[#64748b]">{h}</th>
                       ))}
                     </tr>
@@ -321,6 +340,22 @@ export function LiveDemo() {
                             <CheckCircle2 className="h-4 w-4 text-[#10b981]" />
                           ) : (
                             <AlertCircle className="h-4 w-4 text-[#ef4444]" />
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {result.class === "attack" && (
+                            <button
+                              onClick={() => handleSimulate(result.originalRow, result.id)}
+                              disabled={simulatingId === result.id}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#ef4444]/10 border border-[#ef4444]/20 text-[10px] font-bold text-[#ef4444] uppercase tracking-wider hover:bg-[#ef4444]/20 transition-colors disabled:opacity-50"
+                            >
+                              {simulatingId === result.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Shield className="h-3 w-3" />
+                              )}
+                              Tackle
+                            </button>
                           )}
                         </td>
                       </motion.tr>
@@ -378,6 +413,13 @@ export function LiveDemo() {
           </GlassCard>
         </div>
       </div>
+
+      {threatData && (
+        <ThreatIntelPanel
+          data={threatData}
+          onClose={() => setThreatData(null)}
+        />
+      )}
     </div>
   );
 }

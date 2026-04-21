@@ -295,3 +295,21 @@ class AdversarialTrafficGenerator:
         frame["label_multiclass"] = multiclass_labels
         frame["label_binary"] = 1
         frame.to_csv(path, index=False)
+
+    @classmethod
+    def load(cls, path: Path, feature_names: list[str], device: str = "cpu") -> "AdversarialTrafficGenerator":
+        payload = torch.load(path, map_location=device)
+        generator = cls(
+            feature_names=feature_names,
+            num_classes=payload["num_classes"],
+            feature_dim=payload["feature_dim"],
+            device=device,
+            random_state=payload["random_state"],
+            latent_dim=payload["latent_dim"]
+        )
+        generator.generator.load_state_dict(payload["generator_state_dict"])
+        generator.discriminator.load_state_dict(payload["discriminator_state_dict"])
+        generator.stealth_weight = payload.get("stealth_weight", 0.35)
+        generator.generator.eval()
+        generator.discriminator.eval()
+        return generator

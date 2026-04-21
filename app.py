@@ -22,6 +22,7 @@ except ImportError:  # pragma: no cover - keep the module importable without Fas
 from custom_input import CustomInputRunner
 from training import PipelineConfig
 from training.ids_model import HybridIDSModel
+from training.attacker_generator import AdversarialTrafficGenerator
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +89,66 @@ def _score_frame(frame: pd.DataFrame) -> dict[str, Any]:
     return response
 
 
+def _simulate_evasion_from_frame(frame: pd.DataFrame) -> dict[str, Any]:
+    config = PipelineConfig()
+    runner = CustomInputRunner(config)
+    feature_names = runner._load_feature_names()
+    aligned = runner._align_features(frame, feature_names)
+
+    if len(aligned) == 0:
+        raise HTTPException(status_code=400, detail="No valid input rows.")
+
+    original_row = aligned.iloc[0].to_numpy(dtype="float32")
+
+    model_path = config.model_dir / "attacker_cgan.pt"
+    if not model_path.exists():
+        raise HTTPException(status_code=503, detail="GAN model not ready. Train the pipeline first.")
+        
+    generator = AdversarialTrafficGenerator.load(model_path, feature_names, device=config.device)
+    
+    # Generate 1 evasive sample to show how GAN would mutate attacks
+    morphed_row, _, _ = generator.generate_tabular(sample_count=1, source_multiclass=np.array([1]))
+    morphed_row = morphed_row[0]
+
+    # Find biggest feature differences that increased stealth
+    diffs = np.abs(morphed_row - original_row)
+    top_indices = np.argsort(diffs)[::-1][:5]
+
+    top_features = []
+    counter_measures = []
+
+    for idx in top_indices:
+        fname = feature_names[idx]
+        diff_val = morphed_row[idx] - original_row[idx]
+        direction = "increased" if diff_val > 0 else "decreased"
+        top_features.append({
+            "feature": fname,
+            "original": float(original_row[idx]),
+            "morphed": float(morphed_row[idx]),
+            "shift": direction
+        })
+
+        fname_lower = fname.lower()
+        if "port" in fname_lower:
+            counter_measures.append(f"Block or rate-limit specific destination port anomalies relating to {fname}.")
+        elif "length" in fname_lower or "size" in fname_lower:
+            counter_measures.append(f"Deploy Deep Packet Inspection (DPI) to block payloads with unexpected {fname}.")
+        elif "flag" in fname_lower:
+            counter_measures.append(f"Strengthen firewall rules for TCP control flags, specifically monitoring {fname}.")
+        elif "duration" in fname_lower or "time" in fname_lower:
+            counter_measures.append(f"Implement connection timeouts to mitigate low-and-slow evasions utilizing {fname}.")
+        else:
+            counter_measures.append(f"Update IDS signatures to monitor baseline deviation for {fname}.")
+
+    # Format return dictionary to provide insights and countermeasures directly
+    return {
+        "original_features": original_row.tolist()[:10], # truncate visually
+        "morphed_features": morphed_row.tolist()[:10],
+        "top_shifts": top_features,
+        "counter_measures": list(set(counter_measures))[:4]
+    }
+
+
 def _safe_float(value: Any) -> float | None:
     """Convert a value to float, returning None for NaN/Inf/missing."""
     if value is None:
@@ -131,9 +192,14 @@ if FastAPI is not None:
         return {"status": "ok", "service": "gvg-ids-api"}
 
     @app.post("/predict")
-    def predict(payload: Any) -> dict[str, Any]:
+    def predict(payload: list[dict[str, Any]] | dict[str, Any]) -> dict[str, Any]:
         frame = _payload_to_frame(payload)
         return _score_frame(frame)
+
+    @app.post("/simulate_evasion")
+    def simulate_evasion(payload: list[dict[str, Any]] | dict[str, Any]) -> dict[str, Any]:
+        frame = _payload_to_frame(payload)
+        return _simulate_evasion_from_frame(frame)
 
     # ------------------------------------------------------------------
     # Artifact endpoints — serve real training data to the frontend
